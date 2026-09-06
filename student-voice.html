@@ -309,6 +309,31 @@
     cursor:pointer; letter-spacing:.03em; padding:4px;
   }
   .admin-link:hover{color:var(--maroon-bright);}
+  .search-input{
+    display:none; width:100%; font-family:'Inter',sans-serif; font-size:13.5px;
+    color:var(--ink); background:var(--paper); border:1.5px solid var(--line);
+    border-radius:9px; padding:9px 13px; margin-bottom:14px;
+  }
+  .search-input:focus{ outline:none; border-color:var(--maroon-bright); box-shadow:0 0 0 3px rgba(149,23,26,0.1); }
+  body.admin-on .search-input{ display:block; }
+
+  .official-badge{
+    display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:#fff; background:var(--maroon); padding:3px 9px; border-radius:20px; margin-bottom:6px;
+  }
+  .official-toggle-wrap{
+    display:none; align-items:center; gap:6px; font-size:12px; color:var(--maroon-deep); font-weight:600;
+    margin-bottom:8px; cursor:pointer;
+  }
+  body.admin-on .official-toggle-wrap{ display:flex; }
+
+  .download-report-btn{
+    display:none; background:none; border:none; font-size:12px; color:var(--steel); font-weight:600;
+    cursor:pointer; padding:4px;
+  }
+  .download-report-btn:hover{ color:var(--maroon-bright); }
+  body.admin-on .download-report-btn{ display:inline-block; }
+
   .admin-badge{
     display:none;
     font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
@@ -376,6 +401,9 @@
   }
 
 </style>
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="theme-color" content="#7c1620">
 </head>
 <body>
 <div class="bg-texture"></div>
@@ -430,6 +458,7 @@
       <h2 class="feed-title">What students are saying</h2>
       <span class="feed-count" id="feedCount"></span>
     </div>
+    <input type="text" id="searchInput" class="search-input" placeholder="Search submissions and replies...">
     <div class="feed-tabs">
       <button class="feed-tab active" data-filter="recent">Recent</button>
       <button class="feed-tab" data-filter="all">All</button>
@@ -444,6 +473,7 @@
   <footer>
     <span class="foot-note">Public feed · Run by the KPIS Student Council · <a href="./terms.html" class="foot-link">Terms</a> · <a href="./privacy.html" class="foot-link">Privacy</a></span>
     <span class="admin-badge">Admin mode</span>
+    <button class="download-report-btn" id="downloadReportBtn">Download Report</button>
     <button class="admin-link" id="adminLinkBtn">Admin</button>
   </footer>
 
@@ -659,12 +689,16 @@ async function likeSubmission(id){
   }
 }
 
-async function addReply(submissionId, text){
+async function addReply(submissionId, text, official){
   try{
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({ action: 'reply_add', submissionId, text, idToken: currentIdToken })
+      body: JSON.stringify({
+        action: 'reply_add', submissionId, text, idToken: currentIdToken,
+        official: !!official,
+        password: official ? ADMIN_PASSWORD : undefined
+      })
     });
     return await res.json();
   }catch(e){
@@ -690,6 +724,7 @@ async function deleteReply(id){
 let allSubmissions = [];
 let allReplies = [];
 let currentFilter = 'recent';
+let searchQuery = '';
 
 function repliesFor(id){
   return allReplies.filter(r => r.submissionId === id)
@@ -704,6 +739,7 @@ function renderReplyList(id){
   return '<div class="replies-list">' + replies.map(r =>
     '<div class="reply-item">' +
       '<div class="reply-item-body">' +
+        (r.official ? '<span class="official-badge">✓ Official Response</span>' : '') +
         '<span class="reply-time">' + timeAgo(r.timestamp) + '</span>' +
         '<div class="reply-text">' + escapeHtml(r.text) + '</div>' +
       '</div>' +
@@ -724,12 +760,22 @@ function renderFeed(){
     list = allSubmissions;
   }
 
+  if(searchQuery){
+    const q = searchQuery.toLowerCase();
+    list = list.filter(entry =>
+      entry.text.toLowerCase().includes(q) ||
+      repliesFor(entry.id).some(r => r.text.toLowerCase().includes(q))
+    );
+  }
+
   feedCount.textContent = list.length === 0 ? "" : (list.length + (list.length === 1 ? " entry" : " entries"));
 
   if(list.length === 0){
-    feedList.innerHTML = currentFilter === 'pinned'
-      ? '<div class="empty-state">Nothing pinned yet.</div>'
-      : '<div class="empty-state">Nothing here yet — be the first to share.</div>';
+    feedList.innerHTML = searchQuery
+      ? '<div class="empty-state">No matches for that search.</div>'
+      : (currentFilter === 'pinned'
+        ? '<div class="empty-state">Nothing pinned yet.</div>'
+        : '<div class="empty-state">Nothing here yet — be the first to share.</div>');
     return;
   }
 
@@ -757,6 +803,7 @@ function renderFeed(){
       '<div class="replies-block' + (isOpen ? ' open' : '') + '" data-id="' + entry.id + '">' +
         renderReplyList(entry.id) +
         '<form class="reply-form" data-id="' + entry.id + '">' +
+          '<label class="official-toggle-wrap"><input type="checkbox" class="official-checkbox"> Post as Official Response</label>' +
           '<textarea placeholder="Write a reply..." maxlength="500" required></textarea>' +
           '<button type="submit">Send</button>' +
         '</form>' +
@@ -783,6 +830,11 @@ document.querySelectorAll('.feed-tab').forEach(tab => {
     currentFilter = tab.getAttribute('data-filter');
     renderFeed();
   });
+});
+
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  searchQuery = e.target.value.trim();
+  renderFeed();
 });
 
 document.getElementById('textInput').addEventListener('input', (e) => {
@@ -813,6 +865,10 @@ document.getElementById('voiceForm').addEventListener('submit', async (e) => {
     if(result && result.error === 'auth_required'){
       alert("Your sign-in expired — please sign in again.");
       signOut();
+      return;
+    }
+    if(result && result.error === 'rate_limited'){
+      alert("You've reached today's submission limit. Please try again tomorrow.");
       return;
     }
     alert("Something went wrong sending that in. Please try again.");
@@ -919,11 +975,13 @@ document.getElementById('feedList').addEventListener('submit', async (e) => {
   }
   const id = e.target.getAttribute('data-id');
   const textarea = e.target.querySelector('textarea');
+  const officialCheckbox = e.target.querySelector('.official-checkbox');
+  const isOfficial = officialCheckbox ? officialCheckbox.checked : false;
   const text = textarea.value.trim();
   if(!text) return;
-  const btn = e.target.querySelector('button');
+  const btn = e.target.querySelector('button[type="submit"]');
   btn.disabled = true;
-  const result = await addReply(id, text);
+  const result = await addReply(id, text, isOfficial);
   btn.disabled = false;
   if(!result || !result.success){
     if(result && result.error === 'auth_required'){
@@ -963,6 +1021,35 @@ function tryUnlock(){
 }
 document.getElementById('modalConfirm').addEventListener('click', tryUnlock);
 adminPassword.addEventListener('keydown', (e) => { if(e.key === 'Enter') tryUnlock(); });
+
+function downloadReport(){
+  const lines = [];
+  lines.push('KPIS Student Voice — Report generated ' + new Date().toLocaleString());
+  lines.push('='.repeat(60));
+
+  const sorted = [...allSubmissions].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  sorted.forEach((entry, i) => {
+    lines.push('');
+    lines.push((i + 1) + '. [' + new Date(entry.timestamp).toLocaleString() + ']' +
+      (entry.pinned ? ' [PINNED]' : '') + ' (' + (entry.likes || 0) + ' likes)');
+    lines.push(entry.text);
+    const replies = repliesFor(entry.id);
+    replies.forEach(r => {
+      lines.push('   ↳ ' + (r.official ? '[OFFICIAL] ' : '') + r.text + ' — ' + new Date(r.timestamp).toLocaleString());
+    });
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'kpis-student-voice-report-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+document.getElementById('downloadReportBtn').addEventListener('click', downloadReport);
 
 refreshFeed();
 </script>
